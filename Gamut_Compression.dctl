@@ -1,0 +1,150 @@
+// Gamut compression experiments, by Jed Smith
+// https://gist.github.com/jedypod/ea25c5ff2eed68bfeaaafddd26958133
+// Converted to DCTL by Nick Shaw, www.antlerpost.com
+
+DEFINE_UI_PARAMS(threshold, Threshold, DCTLUI_SLIDER_FLOAT, 0.2f, 0.0f, 1.0f, 0.1);
+DEFINE_UI_PARAMS(cyan, Cyan, DCTLUI_SLIDER_FLOAT, 1.0f, 0.0f, 1.0f, 0.1);
+DEFINE_UI_PARAMS(magenta, Magenta, DCTLUI_SLIDER_FLOAT, 1.0f, 0.0f, 1.0f, 0.1);
+DEFINE_UI_PARAMS(yellow, Yellow, DCTLUI_SLIDER_FLOAT, 1.0f, 0.0f, 1.0f, 0.1);
+DEFINE_UI_PARAMS(method, Compression, DCTLUI_COMBO_BOX, 0, {NS, TM}, {Nick Shaw, Thomas Mansencal});
+DEFINE_UI_PARAMS(workingSpace, Working Space, DCTLUI_COMBO_BOX, 0, {ACEScct, ACEScg}, {ACEScct, ACEScg});
+DEFINE_UI_PARAMS(invert, Invert, DCTLUI_CHECK_BOX, 0);
+
+// Convert ACEScg to ACEScct
+__DEVICE__ float lin_to_ACEScct(float in)
+{
+    if (in <= 0.0078125f)
+    {
+        return 10.5402377416545f * in + 0.0729055341958355f;
+    }
+    else
+    {
+        return (_log2f(in) + 9.72f) / 17.52f;
+    }   
+}
+
+// Convert ACEScct to ACEScg
+__DEVICE__ float ACEScct_to_lin(float in)
+{
+    if (in > 0.155251141552511f)
+    {
+        return _powf( 2.0f, in*17.52f - 9.72f);
+    }
+    else
+    {
+        return (in - 0.0729055341958355f) / 10.5402377416545f;
+    }
+}
+
+// calc hyperbolic tangent
+__DEVICE__ float tanh(float in)
+{
+    float f = _expf(2.0f * in);
+    return (f-1.0f) / (f+1.0f);
+}
+
+__DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p_R, float p_G, float p_B)
+{
+    float3 lim, result;
+    float cd_r, cd_g, cd_b;
+    float atanh_r, atanh_g, atanh_b;
+
+    float r = p_R;
+    float g = p_G;
+    float b = p_B;
+    
+    if (workingSpace == ACEScct) {
+        // linearise ACEScct
+        r = ACEScct_to_lin(r);
+        g = ACEScct_to_lin(g);
+        b = ACEScct_to_lin(b);
+    }
+
+    // thr is the complement of threshold. 
+    // that is: the percentage of the core gamut to protect
+    float thr = 1.0f - threshold;
+
+    // achromatic axis 
+    float ach = _fmaxf(r, _fmaxf(g, b));
+
+    // distance from the achromatic axis for each color component
+    float d_r = _fabs(r-ach) / ach;
+    float d_g = _fabs(g-ach) / ach;
+    float d_b = _fabs(b-ach) / ach;
+
+    // bias limits by color component
+    // range is limited to 0.0001 > lim < 1/thr
+    // upper limit is a hard clip, lower limit is no compression
+    lim.x = 1.0f/_fmaxf(0.0001f, _fminf(1.0f/thr, cyan));
+    lim.y = 1.0f/_fmaxf(0.0001f, _fminf(1.0f/thr, magenta));
+    lim.z = 1.0f/_fmaxf(0.0001f, _fminf(1.0f/thr, yellow));
+
+    // compress distance for each color component
+    if (method == NS) {
+      // softclip method suggested by Nick Shaw here
+      // https://community.acescentral.com/t/simplistic-gamut-mapping-approaches-in-nuke/2679/3
+      // good results, easy to bias look with limits
+      // example plot: https://www.desmos.com/calculator/jyewfptd4y
+      cd_r = d_r < thr ? d_r : thr+(-1/((d_r-thr)/(lim.x-thr)+1)+1)*(lim.x-thr);
+      cd_g = d_g < thr ? d_g : thr+(-1/((d_g-thr)/(lim.y-thr)+1)+1)*(lim.y-thr);
+      cd_b = d_b < thr ? d_b : thr+(-1/((d_b-thr)/(lim.z-thr)+1)+1)*(lim.z-thr);
+
+      if (invert) {
+        // inversed compression distance for each color component
+          cd_r = d_r < thr ? d_r : (_powf(thr, 2.0f) - thr*d_r + (lim.x-thr)*d_r) / (thr + (lim.x-thr) - d_r);
+          cd_g = d_g < thr ? d_g : (_powf(thr, 2.0f) - thr*d_g + (lim.y-thr)*d_g) / (thr + (lim.y-thr) - d_g);
+          cd_b = d_b < thr ? d_b : (_powf(thr, 2.0f) - thr*d_b + (lim.z-thr)*d_b) / (thr + (lim.z-thr) - d_b);
+      }
+    }
+    else if (method == TM) {
+      // hyperbolic tangent softclip method suggested by Thomas Mansencal here
+      // https://community.acescentral.com/t/simplistic-gamut-mapping-approaches-in-nuke/2679/2
+      // gives good results, but perhaps the curve is too asymptotic. very little color shift.
+      // example plot: https://www.desmos.com/calculator/ve9yawvkjf
+      cd_r = d_r > thr ? thr + threshold * tanh((d_r - thr) / threshold) : d_r;
+      cd_g = d_g > thr ? thr + threshold * tanh((d_g - thr) / threshold) : d_g;
+      cd_b = d_b > thr ? thr + threshold * tanh((d_b - thr) / threshold) : d_b;
+      if (invert) {
+          atanh_r = _logf( ( 1+( thr-d_r) / -threshold) / ( 1-( thr-d_r) / -threshold)) / 2;
+          cd_r = d_r > thr ? thr*(-atanh_r) + atanh_r + thr : d_r;
+          atanh_g = _logf( ( 1+( thr-d_g) / -threshold) / ( 1-( thr-d_g) / -threshold)) / 2;
+          cd_g = d_g > thr ? thr*(-atanh_g) + atanh_g + thr : d_g;
+          atanh_b = _logf( ( 1+( thr-d_b) / -threshold) / ( 1-( thr-d_b) / -threshold)) / 2;
+          cd_b = d_b > thr ? thr*(-atanh_b) + atanh_b + thr : d_b;
+      }
+    }
+
+    // gamut compression amount: difference between original and compressed distance
+    float f_r = (d_r - cd_r);
+    float f_g = (d_g - cd_g);
+    float f_b = (d_b - cd_b);
+
+    if (method == TM) {
+        // directly modify the compression amount by the cmy limits, since the 
+        // tanh function doesn't really have a way to rolloff the compression amount
+        // maybe there is a way to do this better?
+        f_r = f_r * _fminf(cyan, (1.0f+threshold));
+        f_g = f_g * _fminf(magenta, (1.0f+threshold));
+        f_b = f_b * _fminf(yellow, (1.0f+threshold));
+    }
+
+    // scale each color component relative to achromatic axis by factor
+    float c_r = (r-ach)/(f_r+1.0f)+ach;
+    float c_g = (g-ach)/(f_g+1.0f)+ach;
+    float c_b = (b-ach)/(f_b+1.0f)+ach;
+
+
+    // skip black pixels to avoid nan values
+    if (r == 0.0f || g == 0.0f || b == 0.0f) {
+      result =  make_float3(r, g, b);
+    } else {
+      result = make_float3(c_r, c_g, c_b);
+    }
+    if (workingSpace == ACEScct) {
+        result.x = lin_to_ACEScct(result.x);
+        result.y = lin_to_ACEScct(result.y);
+        result.z = lin_to_ACEScct(result.z);
+    }
+    return result;
+}
+
