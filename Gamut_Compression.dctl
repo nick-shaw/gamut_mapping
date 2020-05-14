@@ -36,18 +36,6 @@ __DEVICE__ float ACEScct_to_lin(float in)
     }
 }
 
-// calc hyperbolic tangent
-__DEVICE__ float tanh(float in) {
-    float f = _expf(2.0f * in);
-    return (f-1.0f) / (f+1.0f);
-}
-
-// calc inverse hyperbolic tangent
-__DEVICE__ float atanh( float in) 
-{
-  return _logf((1.0f+in)/(1.0f-in))/2.0f;
-}
-
 __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p_R, float p_G, float p_B)
 {
     float3 result;
@@ -81,9 +69,9 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
     float ach = _fmaxf(r, _fmaxf(g, b));
 
     // distance from the achromatic axis for each color component
-    float d_r = ach == 0 ? 0 : _fabs(r-ach) / ach;
-    float d_g = ach == 0 ? 0 : _fabs(g-ach) / ach;
-    float d_b = ach == 0 ? 0 : _fabs(b-ach) / ach;
+    float d_r = ach == 0.0f ? 0.0f : _fabs(r-ach) / ach;
+    float d_g = ach == 0.0f ? 0.0f : _fabs(g-ach) / ach;
+    float d_b = ach == 0.0f ? 0.0f : _fabs(b-ach) / ach;
 
     // compress distance for each color component
     // method 0 : tanh - hyperbolic tangent compression method suggested by Thomas Mansencal https://community.acescentral.com/t/simplistic-gamut-mapping-approaches-in-nuke/2679/2
@@ -93,13 +81,13 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
     float cd_r, cd_g, cd_b;
     if (method == T) {
       if (invert == 0.0f) {
-        cd_r = d_r > thr ? thr + (lim.x - thr) * tanh( ( (d_r - thr)/( lim.x-thr))) : d_r;
-        cd_g = d_g > thr ? thr + (lim.y - thr) * tanh( ( (d_g - thr)/( lim.y-thr))) : d_g;
-        cd_b = d_b > thr ? thr + (lim.z - thr) * tanh( ( (d_b - thr)/( lim.z-thr))) : d_b;
+        cd_r = d_r > thr ? thr + (lim.x - thr) * _tanhf( ( (d_r - thr)/( lim.x-thr))) : d_r;
+        cd_g = d_g > thr ? thr + (lim.y - thr) * _tanhf( ( (d_g - thr)/( lim.y-thr))) : d_g;
+        cd_b = d_b > thr ? thr + (lim.z - thr) * _tanhf( ( (d_b - thr)/( lim.z-thr))) : d_b;
       } else {
-          cd_r = d_r > thr ? thr + (lim.x - thr) * atanh( d_r/( lim.x - thr) - thr/( lim.x - thr)) : d_r;
-          cd_g = d_g > thr ? thr + (lim.y - thr) * atanh( d_g/( lim.y - thr) - thr/( lim.y - thr)) : d_g;
-          cd_b = d_b > thr ? thr + (lim.z - thr) * atanh( d_b/( lim.z - thr) - thr/( lim.z - thr)) : d_b;
+          cd_r = d_r > thr ? thr + (lim.x - thr) * _atanhf( d_r/( lim.x - thr) - thr/( lim.x - thr)) : d_r;
+          cd_g = d_g > thr ? thr + (lim.y - thr) * _atanhf( d_g/( lim.y - thr) - thr/( lim.y - thr)) : d_g;
+          cd_b = d_b > thr ? thr + (lim.z - thr) * _atanhf( d_b/( lim.z - thr) - thr/( lim.z - thr)) : d_b;
       }
     } else if (method == 1.0f) {
       if (invert == E) {
