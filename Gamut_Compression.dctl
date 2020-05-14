@@ -6,7 +6,7 @@ DEFINE_UI_PARAMS(threshold, Threshold, DCTLUI_SLIDER_FLOAT, 0.2f, 0.0f, 0.3f, 0.
 DEFINE_UI_PARAMS(cyan, Cyan, DCTLUI_SLIDER_FLOAT, 1.0f, 0.0f, 1.2f, 0.0);
 DEFINE_UI_PARAMS(magenta, Magenta, DCTLUI_SLIDER_FLOAT, 1.0f, 0.0f, 1.2f, 0.0);
 DEFINE_UI_PARAMS(yellow, Yellow, DCTLUI_SLIDER_FLOAT, 1.0f, 0.0f, 1.2f, 0.0);
-DEFINE_UI_PARAMS(method, Compression, DCTLUI_COMBO_BOX, 0, {T, S}, {tanh, simple});
+DEFINE_UI_PARAMS(method, Compression, DCTLUI_COMBO_BOX, 0, {T, E, S}, {tanh, exp, simple});
 DEFINE_UI_PARAMS(workingSpace, Working Space, DCTLUI_COMBO_BOX, 0, {ACEScct, ACEScg}, {ACEScct, ACEScg});
 DEFINE_UI_PARAMS(invert, Invert, DCTLUI_CHECK_BOX, 0);
 
@@ -86,52 +86,48 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
     float d_b = ach == 0 ? 0 : _fabs(b-ach) / ach;
 
     // compress distance for each color component
+    // method 0 : tanh - hyperbolic tangent compression method suggested by Thomas Mansencal https://community.acescentral.com/t/simplistic-gamut-mapping-approaches-in-nuke/2679/2
+    // method 1 : exp - natural exponent compression method
+    // method 2 : simple - simple Reinhard type compression suggested by Nick Shaw https://community.acescentral.com/t/simplistic-gamut-mapping-approaches-in-nuke/2679/3
+    // example plots for each method: https://www.desmos.com/calculator/x69iyptspq
     float cd_r, cd_g, cd_b;
     if (method == T) {
-      // hyperbolic tangent softclip method suggested by Thomas Mansencal here
-      // https://community.acescentral.com/t/simplistic-gamut-mapping-approaches-in-nuke/2679/2
-      // gives good results, but perhaps the curve is too asymptotic. very little color shift.
-      // example plot: https://www.desmos.com/calculator/jtvzbae25q
-      cd_r = d_r > thr ? thr + (lim.x - thr) * tanh( ( (d_r - thr)/( lim.x-thr))) : d_r;
-      cd_g = d_g > thr ? thr + (lim.y - thr) * tanh( ( (d_g - thr)/( lim.y-thr))) : d_g;
-      cd_b = d_b > thr ? thr + (lim.z - thr) * tanh( ( (d_b - thr)/( lim.z-thr))) : d_b;
-
-      if (invert == 1.0f) {
+      if (invert == 0.0f) {
+        cd_r = d_r > thr ? thr + (lim.x - thr) * tanh( ( (d_r - thr)/( lim.x-thr))) : d_r;
+        cd_g = d_g > thr ? thr + (lim.y - thr) * tanh( ( (d_g - thr)/( lim.y-thr))) : d_g;
+        cd_b = d_b > thr ? thr + (lim.z - thr) * tanh( ( (d_b - thr)/( lim.z-thr))) : d_b;
+      } else {
           cd_r = d_r > thr ? thr + (lim.x - thr) * atanh( d_r/( lim.x - thr) - thr/( lim.x - thr)) : d_r;
           cd_g = d_g > thr ? thr + (lim.y - thr) * atanh( d_g/( lim.y - thr) - thr/( lim.y - thr)) : d_g;
           cd_b = d_b > thr ? thr + (lim.z - thr) * atanh( d_b/( lim.z - thr) - thr/( lim.z - thr)) : d_b;
       }
-    }
-    else if (method == S) {
-      // softclip method suggested by Nick Shaw here
-      // https://community.acescentral.com/t/simplistic-gamut-mapping-approaches-in-nuke/2679/3
-      // good results, easy to bias look with limits
-      // example plot: https://www.desmos.com/calculator/jyewfptd4y
-      cd_r = d_r > thr ? thr+(-1/((d_r-thr)/(lim.x-thr)+1)+1)*(lim.x-thr) : d_r;
-      cd_g = d_g > thr ? thr+(-1/((d_g-thr)/(lim.y-thr)+1)+1)*(lim.y-thr) : d_g;
-      cd_b = d_b > thr ? thr+(-1/((d_b-thr)/(lim.z-thr)+1)+1)*(lim.z-thr) : d_b;
-
-      if (invert == 1.0f) {
-        // inversed compression distance for each color component
+    } else if (method == 1.0f) {
+      if (invert == E) {
+        cd_r = d_r > thr ? lim.x-(lim.x-thr)*exp(-(((d_r-thr)*((1.0f*lim.x)/(lim.x-thr))/lim.x))) : d_r;
+        cd_g = d_g > thr ? lim.y-(lim.y-thr)*exp(-(((d_g-thr)*((1.0f*lim.y)/(lim.y-thr))/lim.y))) : d_g;
+        cd_b = d_b > thr ? lim.z-(lim.z-thr)*exp(-(((d_b-thr)*((1.0f*lim.z)/(lim.z-thr))/lim.z))) : d_b;
+      } else {
+        cd_r = d_r > thr ? -_logf( (d_r-lim.x)/(thr-lim.x))*(-thr+lim.x)/1.0f+thr : d_r;
+        cd_g = d_g > thr ? -_logf( (d_g-lim.y)/(thr-lim.y))*(-thr+lim.y)/1.0f+thr : d_g;
+        cd_b = d_b > thr ? -_logf( (d_b-lim.z)/(thr-lim.z))*(-thr+lim.z)/1.0f+thr : d_b;
+      }
+    } else if (method == S) {
+      if (invert == 0.0f) {
+        cd_r = d_r > thr ? thr+(-1/((d_r-thr)/(lim.x-thr)+1)+1)*(lim.x-thr) : d_r;
+        cd_g = d_g > thr ? thr+(-1/((d_g-thr)/(lim.y-thr)+1)+1)*(lim.y-thr) : d_g;
+        cd_b = d_b > thr ? thr+(-1/((d_b-thr)/(lim.z-thr)+1)+1)*(lim.z-thr) : d_b;
+      } else {
         cd_r = d_r > thr ? (_powf(thr, 2.0f) - thr*d_r + (lim.x-thr)*d_r) / (thr + (lim.x-thr) - d_r) : d_r;
         cd_g = d_g > thr ? (_powf(thr, 2.0f) - thr*d_g + (lim.y-thr)*d_g) / (thr + (lim.y-thr) - d_g) : d_g;
         cd_b = d_b > thr ? (_powf(thr, 2.0f) - thr*d_b + (lim.z-thr)*d_b) / (thr + (lim.z-thr) - d_b) : d_b;
       }
     }
 
+    // scale each color component relative to achromatic axis by gamut compression factor
     float c_r, c_g, c_b;
-    if (invert == 1.0f) {
-      // scale up each color component relative to achromatic axis by gamut uncompression factor
-      c_r = (r-ach)*((cd_r-d_r)+1.0f)+ach;
-      c_g = (g-ach)*((cd_g-d_g)+1.0f)+ach;
-      c_b = (b-ach)*((cd_b-d_b)+1.0f)+ach;
-
-    } else {
-      // scale down each color component relative to achromatic axis by gamut compression factor
-      c_r = (r-ach)/((d_r-cd_r)+1.0f)+ach;
-      c_g = (g-ach)/((d_g-cd_g)+1.0f)+ach;
-      c_b = (b-ach)/((d_b-cd_b)+1.0f)+ach;
-    }
+    c_r = ach-cd_r*ach;
+    c_g = ach-cd_g*ach;
+    c_b = ach-cd_b*ach;
 
     if (threshold < 0.001f) {
       result = make_float3(r, g, b);
