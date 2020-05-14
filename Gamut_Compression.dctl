@@ -80,7 +80,7 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
     // example plots for each method: https://www.desmos.com/calculator/x69iyptspq
     float cd_r, cd_g, cd_b;
     if (method == T) {
-      if (invert == 0.0f) {
+      if (invert == 0) {
         cd_r = d_r > thr ? thr + (lim.x - thr) * _tanhf( ( (d_r - thr)/( lim.x-thr))) : d_r;
         cd_g = d_g > thr ? thr + (lim.y - thr) * _tanhf( ( (d_g - thr)/( lim.y-thr))) : d_g;
         cd_b = d_b > thr ? thr + (lim.z - thr) * _tanhf( ( (d_b - thr)/( lim.z-thr))) : d_b;
@@ -89,8 +89,8 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
           cd_g = d_g > thr ? thr + (lim.y - thr) * _atanhf( d_g/( lim.y - thr) - thr/( lim.y - thr)) : d_g;
           cd_b = d_b > thr ? thr + (lim.z - thr) * _atanhf( d_b/( lim.z - thr) - thr/( lim.z - thr)) : d_b;
       }
-    } else if (method == 1.0f) {
-      if (invert == E) {
+    } else if (method == E) {
+      if (invert == 0) {
         cd_r = d_r > thr ? lim.x-(lim.x-thr)*exp(-(((d_r-thr)*((1.0f*lim.x)/(lim.x-thr))/lim.x))) : d_r;
         cd_g = d_g > thr ? lim.y-(lim.y-thr)*exp(-(((d_g-thr)*((1.0f*lim.y)/(lim.y-thr))/lim.y))) : d_g;
         cd_b = d_b > thr ? lim.z-(lim.z-thr)*exp(-(((d_b-thr)*((1.0f*lim.z)/(lim.z-thr))/lim.z))) : d_b;
@@ -100,7 +100,7 @@ __DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p
         cd_b = d_b > thr ? -_logf( (d_b-lim.z)/(thr-lim.z))*(-thr+lim.z)/1.0f+thr : d_b;
       }
     } else if (method == S) {
-      if (invert == 0.0f) {
+      if (invert == 0) {
         cd_r = d_r > thr ? thr+(-1/((d_r-thr)/(lim.x-thr)+1)+1)*(lim.x-thr) : d_r;
         cd_g = d_g > thr ? thr+(-1/((d_g-thr)/(lim.y-thr)+1)+1)*(lim.y-thr) : d_g;
         cd_b = d_b > thr ? thr+(-1/((d_b-thr)/(lim.z-thr)+1)+1)*(lim.z-thr) : d_b;
